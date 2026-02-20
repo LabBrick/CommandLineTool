@@ -3,6 +3,7 @@
 #include <cctype>
 #include <iostream>
 #include <stdexcept>
+#include <unordered_set>
 using namespace std;
 
 // token acquisition from input file
@@ -284,10 +285,8 @@ Object parsing function:
     5. Validate keys for duplicates using validateObjectKeys().
 */
 void Parser::parseObject(int depth) {
-    // I do NOT want to have to trace a stack of keys to check for duplicates, that seems excessive.
-    // instead, I'm going to just track the start and end of the object in the tokens vector
-    size_t startIndex = tokens.size();
-    bool inObject = true;
+    // track keys seen in this object to detect duplicates
+    unordered_set<string> seenKeys;
     // expect left bracket '{'
     expect(Tokenizer::TokenType::LEFT_BRACKET, "Expected '{'");
     // if comments are found here, throw error
@@ -296,7 +295,6 @@ void Parser::parseObject(int depth) {
     }
     // check for empty object
     if (match(Tokenizer::TokenType::RIGHT_BRACKET)) {
-        inObject = false;
         // empty object
         tokens.push_back(currentToken);
         // push right bracket and advance
@@ -306,9 +304,15 @@ void Parser::parseObject(int depth) {
 
     // while true to keep parsing key-value pairs
     do {
-        // push current token (key)
+        // push current token (key) and save its value for duplicate check
         tokens.push_back(currentToken);
+        string keyValue = currentToken.value;
+        // validate it is a string key before checking for duplicates
         expect(Tokenizer::TokenType::STRING, "Expected string key in object");
+        // check for duplicate key within this object (after confirming valid string)
+        if (!seenKeys.insert(keyValue).second) {
+            throw runtime_error("Duplicate key in object: " + keyValue);
+        }
         // push colon ':'
         tokens.push_back(currentToken);
         expect(Tokenizer::TokenType::COLON, "Expected ':' after object key");
@@ -343,11 +347,6 @@ void Parser::parseObject(int depth) {
             throw runtime_error("Expected ',' or '}' in object");
         }
     } while (true);
-    // problematic spot - validate object keys for duplicates
-    // startIndex, tokens.size()
-    // if (!validateObjectKeys()) {
-    // throw runtime_error("Duplicate keys found in object");
-    //}
 }
 
 /*
@@ -605,57 +604,64 @@ void parseAndWriteJsonFiles(std::ifstream &inFile, std::ofstream &outFile) {
 }
 
 void testJsonParsing() {
-    // just tossing all of em in an array
-    const std::vector<std::string> testFiles = {
-        // "./testing/fail1.json",
-        // "./testing/fail2.json",
-        // "./testing/fail3.json",
-        // "./testing/fail4.json",
-        // "./testing/fail5.json",
-        // "./testing/fail6.json",
-        // "./testing/fail7.json",
-        // "./testing/fail8.json",
-        // "./testing/fail9.json",
-        // "./testing/fail10.json",
-        "./testing/fail11.json",
-        // "./testing/fail12.json",
-        // "./testing/fail13.json",
-        // "./testing/fail14.json",
-        // "./testing/fail15.json",
-        // "./testing/pass1.json",
-        // "./testing/pass2.json",
-        // "./testing/pass3.json",
-        // "./testing/pass4.json",
-        // "./testing/pass5.json",
-        // "./testing/pass6.json",
-        // "./testing/pass7.json",
-        // "./testing/pass8.json",
-        // "./testing/pass9.json",
-        // "./testing/pass10.json",
-        "./testing/pass11.json",
-        // "./testing/pass12.json",
-        // "./testing/pass13.json",
-        // "./testing/pass14.json",
-        // "./testing/pass15.json",
-        "./testing/testingFinal.json",
+    struct TestCase {
+        std::string filePath;
+        bool shouldPass;
     };
-    // for each file, output an error message if it fails to parse for what it is supposed to fail on
-    for (const auto &filePath : testFiles) {
-        // open file
-        std::ifstream inFile(filePath);
-        // check if file opened successfully
+    // each fail* file should be rejected, each pass* file should be accepted
+    const std::vector<TestCase> testCases = {
+        {"./testing/fail1.json", false},
+        {"./testing/fail2.json", false},
+        {"./testing/fail3.json", false},
+        {"./testing/fail4.json", false},
+        {"./testing/fail5.json", false},
+        {"./testing/fail6.json", false},
+        {"./testing/fail7.json", false},
+        {"./testing/fail8.json", false},
+        {"./testing/fail9.json", false},
+        {"./testing/fail10.json", false},
+        {"./testing/fail11.json", false},
+        {"./testing/fail12.json", false},
+        {"./testing/fail13.json", false},
+        {"./testing/fail14.json", false},
+        {"./testing/fail15.json", false},
+        {"./testing/pass1.json", true},
+        {"./testing/pass2.json", true},
+        {"./testing/pass3.json", true},
+        {"./testing/pass4.json", true},
+        {"./testing/pass5.json", true},
+        {"./testing/pass6.json", true},
+        {"./testing/pass7.json", true},
+        {"./testing/pass8.json", true},
+        {"./testing/pass9.json", true},
+        {"./testing/pass10.json", true},
+        {"./testing/pass11.json", true},
+        {"./testing/pass12.json", true},
+        {"./testing/pass13.json", true},
+        {"./testing/pass14.json", true},
+        {"./testing/pass15.json", true},
+        {"./testing/testingFinal.json", true},
+    };
+    // for each test case, run the parser and check whether the result matches expectation
+    for (const auto &tc : testCases) {
+        std::ifstream inFile(tc.filePath);
         if (!inFile) {
-            throw runtime_error("Failed to open test file: " + filePath);
+            std::cerr << "Failed to open test file: " << tc.filePath << std::endl;
             continue;
         }
-        // try parsing
         try {
-            // parse the JSON file into tokens
             auto tokens = parseJsonFile(inFile);
-            // if we got here, parsing succeeded and we got some useful output
-            std::cout << "Parsed successfully: " << filePath << std::endl;
+            if (tc.shouldPass) {
+                std::cout << "PASS: " << tc.filePath << " --- parsed successfully" << std::endl;
+            } else {
+                std::cout << "FAIL (unexpected pass): " << tc.filePath << " --- should have been rejected" << std::endl;
+            }
         } catch (const std::runtime_error &e) {
-            cerr << "Error parsing file " << filePath << ": " << e.what() << std::endl;
+            if (!tc.shouldPass) {
+                std::cout << "PASS: " << tc.filePath << " --- correctly rejected: " << e.what() << std::endl;
+            } else {
+                std::cerr << "FAIL (unexpected error): " << tc.filePath << ": " << e.what() << std::endl;
+            }
         }
         inFile.close();
     }
